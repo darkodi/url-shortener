@@ -9,6 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/darkodi/url-shortener/internal/handler"
+	"github.com/darkodi/url-shortener/internal/middleware"
 	"github.com/darkodi/url-shortener/internal/repository"
 	"github.com/darkodi/url-shortener/internal/service"
 )
@@ -33,6 +34,14 @@ func main() {
 	h := handler.NewURLHandler(svc)
 	router := h.SetupRoutes()
 
+	// wrap router with middleware
+	wrappedRouter := middleware.Chain(
+		router,
+		middleware.RequestID, // first assign request ID
+		middleware.Recovery,  // then recover from panics
+		middleware.Logging,   // then log requests
+	)
+
 	// Start server
 	addr := ":" + port
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", addr)
@@ -44,7 +53,7 @@ func main() {
 	fmt.Println("  GET  /health      - Health check")
 	fmt.Println("───────────────────────────────────────")
 
-	if err := http.ListenAndServe(addr, router); err != nil {
+	if err := http.ListenAndServe(addr, wrappedRouter); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
