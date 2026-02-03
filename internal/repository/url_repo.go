@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/darkodi/url-shortener/internal/model"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var ErrNotFound = errors.New("url not found")
