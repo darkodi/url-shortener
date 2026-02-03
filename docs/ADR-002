@@ -1,0 +1,21 @@
+## ADR-002: Base62 Encoding for Short Codes
+
+**Date:** 2026-02-03
+
+**Status:** Accepted
+
+### Context
+Need to generate unique, short, URL-safe identifiers.
+
+### Decision
+Use Base62 encoding (0-9, a-z, A-Z) of auto-increment database IDs.
+
+### Rationale
+- No collisions (IDs are unique)
+- Short output (6 chars = 56B combinations)
+- URL-safe characters only
+- Reversible (can decode back to ID)
+
+### Trade-offs
+- Sequential IDs are guessable (acceptable for MVP)
+- Will address with random offset in later stages
