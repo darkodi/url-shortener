@@ -83,3 +83,7 @@ func (r *URLRepository) GetNextID() (uint64, error) {
 	}
 	return uint64(maxID.Int64) + 1, nil
 }
+
+func (r *URLRepository) Close() error {
+	return r.db.Close()
+}

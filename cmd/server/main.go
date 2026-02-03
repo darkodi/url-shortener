@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -42,19 +46,71 @@ func main() {
 		middleware.Logging,   // then log requests
 	)
 
-	// Start server
+	// ============================================================
+	// GRACEFUL SHUTDOWN SETUP
+	// ============================================================
+	// Create server with timeouts
 	addr := ":" + port
-	fmt.Printf("🚀 Server starting on http://localhost%s\n", addr)
-	fmt.Println("───────────────────────────────────────")
-	fmt.Println("Endpoints:")
-	fmt.Println("  POST /shorten     - Create short URL")
-	fmt.Println("  GET  /{code}      - Redirect to original")
-	fmt.Println("  GET  /{code}/stats - View statistics")
-	fmt.Println("  GET  /health      - Health check")
-	fmt.Println("───────────────────────────────────────")
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      wrappedRouter,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	// Channel to listen for shutdown signals
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
-	if err := http.ListenAndServe(addr, wrappedRouter); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	// Channel to track server errors
+	serverErr := make(chan error, 1)
+
+	// Start server in a goroutine
+	go func() {
+		fmt.Printf("🚀 Server starting on http://localhost%s\n", addr)
+		fmt.Println("───────────────────────────────────────")
+		fmt.Println("Endpoints:")
+		fmt.Println("  POST /shorten      - Create short URL")
+		fmt.Println("  GET  /{code}       - Redirect to original")
+		fmt.Println("  GET  /{code}/stats - View statistics")
+		fmt.Println("  GET  /health       - Health check")
+		fmt.Println("───────────────────────────────────────")
+		fmt.Println("Press Ctrl+C to shutdown gracefully")
+
+		serverErr <- server.ListenAndServe()
+	}()
+
+	// ============================================================
+	// WAIT FOR SHUTDOWN OR ERROR
+	// ============================================================
+	select {
+	case err := <-serverErr:
+		log.Fatalf("Server error: %v", err)
+
+	case sig := <-shutdown:
+		fmt.Printf("\n⚠️  Caught signal %v: shutting down gracefully...\n", sig)
+		// Create context with timeout for shutdown
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			30*time.Second,
+		)
+		defer cancel()
+
+		// Attempt graceful shutdown
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Graceful shutdown failed: %v", err)
+			// force close if graceful shutdown fails
+			if err := server.Close(); err != nil {
+				log.Printf("Forced shutdown failed: %v", err)
+			}
+		}
+
+		// Close repository (database connection)
+		if err := repo.Close(); err != nil {
+			log.Printf("Failed to close database: %v", err)
+		}
+
+		fmt.Println("✅ Server stopped")
 	}
 }
 
