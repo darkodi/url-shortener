@@ -5,39 +5,24 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/darkodi/url-shortener/internal/errors"
 	"github.com/darkodi/url-shortener/internal/model"
 	"github.com/darkodi/url-shortener/internal/service"
+	"github.com/darkodi/url-shortener/internal/validator"
 )
 
 // URLHandler handles HTTP requests for URL operations
 type URLHandler struct {
-	service *service.URLService
+	service   *service.URLService
+	validator *validator.URLValidator
 }
 
 // NewURLHandler creates a new handler instance
 func NewURLHandler(svc *service.URLService) *URLHandler {
-	return &URLHandler{service: svc}
-}
-
-// ============ RESPONSE HELPERS ============
-
-// ErrorResponse represents an error in JSON format
-type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message,omitempty"`
-}
-
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
-}
-
-func writeError(w http.ResponseWriter, status int, err string, message string) {
-	writeJSON(w, status, ErrorResponse{
-		Error:   err,
-		Message: message,
-	})
+	return &URLHandler{
+		service:   svc,
+		validator: validator.NewURLValidator(),
+	}
 }
 
 // ============ HANDLERS ============
@@ -47,38 +32,52 @@ func writeError(w http.ResponseWriter, status int, err string, message string) {
 func (h *URLHandler) HandleShorten(w http.ResponseWriter, r *http.Request) {
 	// Only accept POST
 	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST")
+		errors.BadRequest("Use POST method").WriteJSON(w)
 		return
 	}
 
 	// Parse JSON body
 	var req model.CreateURLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "Could not parse request body")
+		errors.InvalidJSON(err.Error()).WriteJSON(w)
+		return
+	}
+
+	// Validate URL with enhanced validator
+	if appErr := h.validator.ValidateURL(req.URL); appErr != nil {
+		appErr.WriteJSON(w)
+		return
+	}
+
+	// Validate custom alias if provided
+	if appErr := h.validator.ValidateCustomCode(req.CustomAlias); appErr != nil {
+		appErr.WriteJSON(w)
 		return
 	}
 
 	// Call service
 	resp, err := h.service.CreateShortURL(req)
 	if err != nil {
-		// Map service errors to HTTP status codes
+		// Map service errors to AppErrors
 		switch err {
 		case service.ErrEmptyURL:
-			writeError(w, http.StatusBadRequest, "empty_url", "URL is required")
+			errors.MissingField("url").WriteJSON(w)
 		case service.ErrInvalidURL:
-			writeError(w, http.StatusBadRequest, "invalid_url", "URL must be valid http/https")
+			errors.InvalidURL("URL must be valid http/https").WriteJSON(w)
 		case service.ErrAliasExists:
-			writeError(w, http.StatusConflict, "alias_taken", "Custom alias already in use")
+			errors.URLExists(req.CustomAlias).WriteJSON(w)
 		case service.ErrInvalidAlias:
-			writeError(w, http.StatusBadRequest, "invalid_alias", "Alias must be 3-20 alphanumeric chars")
+			errors.BadRequest("Alias must be 3-20 alphanumeric characters").WriteJSON(w)
 		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Something went wrong")
+			errors.Internal("").WriteJSON(w)
 		}
 		return
 	}
 
 	// Success!
-	writeJSON(w, http.StatusCreated, resp)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
 }
 
 // HandleRedirect redirects to the original URL
@@ -106,14 +105,20 @@ func (h *URLHandler) HandleRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate short code format
+	if appErr := h.validator.ValidateShortCode(shortCode); appErr != nil {
+		appErr.WriteJSON(w)
+		return
+	}
+
 	// Resolve the short code
 	originalURL, err := h.service.Resolve(shortCode)
 	if err != nil {
 		if err == service.ErrURLNotFound {
-			writeError(w, http.StatusNotFound, "not_found", "Short URL not found")
+			errors.URLNotFound(shortCode).WriteJSON(w)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Something went wrong")
+		errors.Internal("").WriteJSON(w)
 		return
 	}
 
@@ -124,25 +129,32 @@ func (h *URLHandler) HandleRedirect(w http.ResponseWriter, r *http.Request) {
 // handleStats returns statistics for a short URL
 // GET /{shortCode}/stats
 func (h *URLHandler) handleStats(w http.ResponseWriter, r *http.Request, shortCode string) {
-	stats, err := h.service.GetURLStats(shortCode)
-	if err != nil {
-		if err == service.ErrURLNotFound {
-			writeError(w, http.StatusNotFound, "not_found", "Short URL not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Something went wrong")
+	// Validate short code format
+	if appErr := h.validator.ValidateShortCode(shortCode); appErr != nil {
+		appErr.WriteJSON(w)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, stats)
+	stats, err := h.service.GetURLStats(shortCode)
+	if err != nil {
+		if err == service.ErrURLNotFound {
+			errors.URLNotFound(shortCode).WriteJSON(w)
+			return
+		}
+		errors.Internal("").WriteJSON(w)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 // HandleHealth returns service health status
 // GET /health
 func (h *URLHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status": "healthy",
-	})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status": "healthy"}`))
 }
 
 // ============ ROUTER SETUP ============

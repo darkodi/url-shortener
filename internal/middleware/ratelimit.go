@@ -37,7 +37,7 @@ func DefaultRateLimiterConfig() RateLimiterConfig {
 	return RateLimiterConfig{
 		Rate:     10,              // 10 requests
 		Burst:    20,              // burst up to 20
-		Interval: time.Second,    // per second
+		Interval: time.Second,     // per second
 		Cleanup:  5 * time.Minute, // cleanup every 5 min
 	}
 }
@@ -78,7 +78,7 @@ func (rl *RateLimiter) Allow(ip string) bool {
 
 	// Calculate tokens to add based on time elapsed
 	elapsed := now.Sub(c.lastCheck)
-	tokensToAdd := int(elapsed / rl.interval) * rl.rate
+	tokensToAdd := int(elapsed/rl.interval) * rl.rate
 
 	if tokensToAdd > 0 {
 		c.tokens = min(c.tokens+tokensToAdd, rl.burst)
@@ -137,7 +137,7 @@ func (rl *RateLimiter) Middleware() Middleware {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Retry-After", "1") // Suggest retry after 1 second
 				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte(`{"error": "rate limit exceeded", "retry_after": "1s"}`))
+				w.Write([]byte(`{"error":{"code":"RATE_LIMIT_EXCEEDED","message":"Too many requests, please try again later"}}`))
 				return
 			}
 
