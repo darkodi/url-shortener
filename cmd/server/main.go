@@ -8,10 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/darkodi/url-shortener/internal/config"
 	"github.com/darkodi/url-shortener/internal/handler"
 	"github.com/darkodi/url-shortener/internal/middleware"
 	"github.com/darkodi/url-shortener/internal/repository"
@@ -19,20 +19,33 @@ import (
 )
 
 func main() {
-	// Configuration
-	port := getEnv("PORT", "8080")
-	dbPath := getEnv("DB_PATH", "./data/urls.db")
-	baseURL := getEnv("BASE_URL", "http://localhost:"+port)
+	// ============================================================
+	// LOAD CONFIGURATION
+	// ============================================================
+	fmt.Println("📋 Loading configuration...")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
 
-	// Initialize layers (bottom-up)
+	if cfg.IsDevelopment() {
+		fmt.Printf("   Environment: %s\n", cfg.App.Environment)
+		fmt.Printf("   Port: %s\n", cfg.Server.Port)
+		fmt.Printf("   Database: %s\n", cfg.Database.Path)
+		fmt.Printf("   Base URL: %s\n", cfg.App.BaseURL)
+	}
+
+	// ============================================================
+	// INITIALIZE LAYERS
+	// ============================================================
 	fmt.Println("🗄️  Connecting to database...")
-	repo, err := repository.NewURLRepository(dbPath)
+	repo, err := repository.NewURLRepository(cfg.Database.Path)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
 	fmt.Println("⚙️  Initializing service...")
-	svc := service.NewURLService(repo, baseURL)
+	svc := service.NewURLService(repo, cfg.App.BaseURL)
 
 	fmt.Println("🌐 Setting up HTTP handlers...")
 	h := handler.NewURLHandler(svc)
@@ -47,16 +60,15 @@ func main() {
 	)
 
 	// ============================================================
-	// GRACEFUL SHUTDOWN SETUP
+	// CREATE SERVER WITH CONFIG TIMEOUTS
 	// ============================================================
-	// Create server with timeouts
-	addr := ":" + port
+	addr := ":" + cfg.Server.Port
 	server := &http.Server{
 		Addr:         addr,
 		Handler:      wrappedRouter,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
 	// Channel to listen for shutdown signals
 	shutdown := make(chan os.Signal, 1)
@@ -92,7 +104,7 @@ func main() {
 		// Create context with timeout for shutdown
 		ctx, cancel := context.WithTimeout(
 			context.Background(),
-			30*time.Second,
+			cfg.Server.ShutdownTimeout,
 		)
 		defer cancel()
 
@@ -112,11 +124,4 @@ func main() {
 
 		fmt.Println("✅ Server stopped")
 	}
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
