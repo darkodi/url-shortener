@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/darkodi/url-shortener/internal/logger"
 )
 
 // Config holds all application configuration
@@ -13,6 +15,7 @@ type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	App      AppConfig
+	Log      logger.Config
 }
 
 // ServerConfig holds HTTP server settings
@@ -52,6 +55,10 @@ func Load() (*Config, error) {
 			BaseURL:     getEnv("BASE_URL", ""),
 			Environment: getEnv("ENVIRONMENT", "development"),
 		},
+		Log: logger.Config{
+			Level:  getEnv("LOG_LEVEL", "info"),
+			Format: getEnv("LOG_FORMAT", "text"),
+		},
 	}
 
 	// Set default BaseURL if not provided
@@ -88,6 +95,16 @@ func (c *Config) Validate() error {
 	}
 	if !validEnvs[c.App.Environment] {
 		return fmt.Errorf("invalid environment: %s (must be development, production, or testing)", c.App.Environment)
+	}
+	// Validate log level
+	validLevels := map[string]bool{
+		"debug": true,
+		"info":  true,
+		"warn":  true,
+		"error": true,
+	}
+	if !validLevels[c.Log.Level] {
+		return fmt.Errorf("invalid log level: %s", c.Log.Level)
 	}
 
 	return nil

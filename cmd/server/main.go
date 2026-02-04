@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/darkodi/url-shortener/internal/config"
 	"github.com/darkodi/url-shortener/internal/handler"
+	"github.com/darkodi/url-shortener/internal/logger"
 	"github.com/darkodi/url-shortener/internal/middleware"
 	"github.com/darkodi/url-shortener/internal/repository"
 	"github.com/darkodi/url-shortener/internal/service"
@@ -25,7 +25,7 @@ func main() {
 	fmt.Println("📋 Loading configuration...")
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		panic("Failed to load configuration: " + err.Error())
 	}
 
 	if cfg.IsDevelopment() {
@@ -36,12 +36,26 @@ func main() {
 	}
 
 	// ============================================================
+	// Initialize logger
+	// ============================================================
+	fmt.Println("📝 Initializing logger...")
+	log := logger.New(logger.Config{
+		Level:       cfg.Log.Level,
+		Format:      cfg.Log.Format,
+		Environment: cfg.App.Environment,
+	})
+	log.Info("starting url-shortener",
+		"level", cfg.Log.Level,
+		"format", cfg.Log.Format,
+		"environment", cfg.App.Environment)
+	// ============================================================
 	// INITIALIZE LAYERS
 	// ============================================================
 	fmt.Println("🗄️  Connecting to database...")
 	repo, err := repository.NewURLRepository(cfg.Database.Path)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		log.Error("Failed to initialize database", "error", err.Error())
+		os.Exit(1)
 	}
 
 	fmt.Println("⚙️  Initializing service...")
@@ -54,9 +68,9 @@ func main() {
 	// wrap router with middleware
 	wrappedRouter := middleware.Chain(
 		router,
-		middleware.RequestID, // first assign request ID
-		middleware.Recovery,  // then recover from panics
-		middleware.Logging,   // then log requests
+		middleware.RequestID,               // first assign request ID
+		middleware.RecoveryWithLogger(log), // then recover from panics
+		middleware.LoggingWithLogger(log),  // then log requests
 	)
 
 	// ============================================================
@@ -79,16 +93,18 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		fmt.Printf("🚀 Server starting on http://localhost%s\n", addr)
-		fmt.Println("───────────────────────────────────────")
-		fmt.Println("Endpoints:")
-		fmt.Println("  POST /shorten      - Create short URL")
-		fmt.Println("  GET  /{code}       - Redirect to original")
-		fmt.Println("  GET  /{code}/stats - View statistics")
-		fmt.Println("  GET  /health       - Health check")
-		fmt.Println("───────────────────────────────────────")
-		fmt.Println("Press Ctrl+C to shutdown gracefully")
-
+		if cfg.IsDevelopment() {
+			fmt.Printf("🚀 Server starting on http://localhost%s\n", addr)
+			fmt.Println("───────────────────────────────────────")
+			fmt.Println("Endpoints:")
+			fmt.Println("  POST /shorten      - Create short URL")
+			fmt.Println("  GET  /{code}       - Redirect to original")
+			fmt.Println("  GET  /{code}/stats - View statistics")
+			fmt.Println("  GET  /health       - Health check")
+			fmt.Println("───────────────────────────────────────")
+			fmt.Println("Press Ctrl+C to shutdown gracefully")
+		}
+		log.Info("server starting", "addr", "http://localhost"+addr)
 		serverErr <- server.ListenAndServe()
 	}()
 
@@ -97,10 +113,11 @@ func main() {
 	// ============================================================
 	select {
 	case err := <-serverErr:
-		log.Fatalf("Server error: %v", err)
+		log.Error("server error", "error", err.Error())
+		os.Exit(1)
 
 	case sig := <-shutdown:
-		fmt.Printf("\n⚠️  Caught signal %v: shutting down gracefully...\n", sig)
+		log.Info("shutdown signal received", "signal", sig.String())
 		// Create context with timeout for shutdown
 		ctx, cancel := context.WithTimeout(
 			context.Background(),
@@ -110,18 +127,18 @@ func main() {
 
 		// Attempt graceful shutdown
 		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("Graceful shutdown failed: %v", err)
+			log.Error("graceful shutdown failed", "error", err.Error())
 			// force close if graceful shutdown fails
 			if err := server.Close(); err != nil {
-				log.Printf("Forced shutdown failed: %v", err)
+				log.Error("forced shutdown failed", "error", err.Error())
 			}
 		}
 
 		// Close repository (database connection)
 		if err := repo.Close(); err != nil {
-			log.Printf("Failed to close database: %v", err)
+			log.Error("failed to close database", "error", err.Error())
 		}
 
-		fmt.Println("✅ Server stopped")
+		log.Info("server stopped")
 	}
 }

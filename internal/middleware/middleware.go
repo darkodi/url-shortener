@@ -1,11 +1,12 @@
 package middleware
 
 import (
-	"log"
+	"context"
 	"net/http"
 	"runtime/debug"
 	"time"
 
+	"github.com/darkodi/url-shortener/internal/logger"
 	"github.com/google/uuid"
 )
 
@@ -16,20 +17,28 @@ import (
 // Middleware is a function that wraps an http.Handler
 type Middleware func(http.Handler) http.Handler
 
+// ContextKey type for context values
+type ContextKey string
+
+const (
+	// RequestIDKey is the context key for request ID
+	RequestIDKey ContextKey = "request_id"
+)
+
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
-	status      int
+	statusCode  int
 	wroteHeader bool
 }
 
 func wrapResponseWriter(w http.ResponseWriter) *responseWriter {
-	return &responseWriter{ResponseWriter: w, status: http.StatusOK}
+	return &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
 	if !rw.wroteHeader {
-		rw.status = code
+		rw.statusCode = code
 		rw.wroteHeader = true
 		rw.ResponseWriter.WriteHeader(code)
 	}
@@ -45,76 +54,81 @@ func RequestID(next http.Handler) http.Handler {
 		// Check if request already has an ID (from load balancer, etc.)
 		requestID := r.Header.Get("X-Request-ID")
 		if requestID == "" {
-			requestID = uuid.New().String()
+			requestID = uuid.New().String()[:8] // Short ID for readability
 		}
 
-		// Add to response headers so client can reference it
+		// Add to response headers
 		w.Header().Set("X-Request-ID", requestID)
 
-		// Add to request context for use in handlers
-		// (We'll enhance this later)
+		// Add to request context for use in handlers and other middleware
+		ctx := context.WithValue(r.Context(), RequestIDKey, requestID)
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // ============================================================
-// LOGGING MIDDLEWARE
+// LOGGING MIDDLEWARE (with structured logger)
 // ============================================================
 
-// Logging logs every request with method, path, status, and duration
-func Logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+// LoggingWithLogger creates a logging middleware with a structured logger
+func LoggingWithLogger(log *logger.Logger) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
 
-		// Wrap response writer to capture status code
-		wrapped := wrapResponseWriter(w)
+			// Get request ID from context
+			reqID := getRequestID(r.Context())
 
-		// Get request ID from header (set by RequestID middleware)
-		requestID := w.Header().Get("X-Request-ID")
+			// Wrap response writer to capture status code
+			wrapped := wrapResponseWriter(w)
 
-		// Process request
-		next.ServeHTTP(wrapped, r)
+			// Process request
+			next.ServeHTTP(wrapped, r)
 
-		// Log after request completes
-		log.Printf(
-			"[%s] %s %s %s %d %v",
-			requestID[:8], // First 8 chars of request ID
-			r.Method,
-			r.URL.Path,
-			r.RemoteAddr,
-			wrapped.status,
-			time.Since(start),
-		)
-	})
+			// Log the request
+			log.Info("request completed",
+				"request_id", reqID,
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", wrapped.statusCode,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"remote_addr", r.RemoteAddr,
+			)
+		})
+	}
 }
 
 // ============================================================
-// RECOVERY MIDDLEWARE
+// RECOVERY MIDDLEWARE (with structured logger)
 // ============================================================
 
-// Recovery catches panics and returns 500 instead of crashing
-func Recovery(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				// Log the stack trace
-				log.Printf(
-					"PANIC RECOVERED: %v\n%s",
-					err,
-					debug.Stack(),
-				)
+// RecoveryWithLogger creates a recovery middleware with structured logging
+func RecoveryWithLogger(log *logger.Logger) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if err := recover(); err != nil {
+					reqID := getRequestID(r.Context())
 
-				// Return 500 to client
-				http.Error(w,
-					"Internal Server Error",
-					http.StatusInternalServerError,
-				)
-			}
-		}()
+					log.Error("panic recovered",
+						"request_id", reqID,
+						"error", err,
+						"stack", string(debug.Stack()),
+						"method", r.Method,
+						"path", r.URL.Path,
+					)
 
-		next.ServeHTTP(w, r)
-	})
+					http.Error(w,
+						`{"error": "Internal server error"}`,
+						http.StatusInternalServerError,
+					)
+				}
+			}()
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // ============================================================
@@ -123,9 +137,19 @@ func Recovery(next http.Handler) http.Handler {
 
 // Chain applies middlewares in order (first middleware is outermost)
 func Chain(h http.Handler, middlewares ...Middleware) http.Handler {
-	// Apply in reverse so first middleware is outermost
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		h = middlewares[i](h)
 	}
 	return h
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+func getRequestID(ctx context.Context) string {
+	if reqID, ok := ctx.Value(RequestIDKey).(string); ok {
+		return reqID
+	}
+	return "unknown"
 }
