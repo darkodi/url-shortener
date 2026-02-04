@@ -6,16 +6,15 @@ import (
 	"os"
 	"strconv"
 	"time"
-
-	"github.com/darkodi/url-shortener/internal/logger"
 )
 
 // Config holds all application configuration
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	App      AppConfig
-	Log      logger.Config
+	Server    ServerConfig
+	Database  DatabaseConfig
+	App       AppConfig
+	Log       LogConfig
+	RateLimit RateLimitConfig
 }
 
 // ServerConfig holds HTTP server settings
@@ -38,6 +37,20 @@ type AppConfig struct {
 	Environment string // "development", "production"
 }
 
+type LogConfig struct {
+	Level       string
+	Format      string
+	Environment string
+}
+
+type RateLimitConfig struct {
+	Enabled  bool
+	Rate     int           // Requests per interval
+	Burst    int           // Max burst
+	Interval time.Duration // Refill interval
+	Cleanup  time.Duration // Cleanup interval
+}
+
 // Load reads configuration from environment variables
 func Load() (*Config, error) {
 	cfg := &Config{
@@ -55,9 +68,17 @@ func Load() (*Config, error) {
 			BaseURL:     getEnv("BASE_URL", ""),
 			Environment: getEnv("ENVIRONMENT", "development"),
 		},
-		Log: logger.Config{
-			Level:  getEnv("LOG_LEVEL", "info"),
-			Format: getEnv("LOG_FORMAT", "text"),
+		Log: LogConfig{
+			Level:       getEnv("LOG_LEVEL", "info"),
+			Format:      getEnv("LOG_FORMAT", "text"),
+			Environment: getEnv("ENVIRONMENT", "development"),
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:  getBoolEnv("RATE_LIMIT_ENABLED", true),
+			Rate:     getIntEnv("RATE_LIMIT_RATE", 10),
+			Burst:    getIntEnv("RATE_LIMIT_BURST", 20),
+			Interval: getDurationEnv("RATE_LIMIT_INTERVAL", time.Second),
+			Cleanup:  getDurationEnv("RATE_LIMIT_CLEANUP", 5*time.Minute),
 		},
 	}
 
@@ -155,4 +176,12 @@ func getIntEnv(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return intValue
+}
+func getBoolEnv(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if b, err := strconv.ParseBool(value); err == nil {
+			return b
+		}
+	}
+	return defaultValue
 }

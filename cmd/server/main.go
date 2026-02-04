@@ -39,11 +39,13 @@ func main() {
 	// Initialize logger
 	// ============================================================
 	fmt.Println("📝 Initializing logger...")
+	// Create logger - manually map config fields
 	log := logger.New(logger.Config{
 		Level:       cfg.Log.Level,
 		Format:      cfg.Log.Format,
-		Environment: cfg.App.Environment,
+		Environment: cfg.Log.Environment,
 	})
+
 	log.Info("starting url-shortener",
 		"level", cfg.Log.Level,
 		"format", cfg.Log.Format,
@@ -65,13 +67,33 @@ func main() {
 	h := handler.NewURLHandler(svc)
 	router := h.SetupRoutes()
 
-	// wrap router with middleware
-	wrappedRouter := middleware.Chain(
-		router,
-		middleware.RequestID,               // first assign request ID
-		middleware.RecoveryWithLogger(log), // then recover from panics
-		middleware.LoggingWithLogger(log),  // then log requests
-	)
+	// ============================================================
+	// BUILD MIDDLEWARE CHAIN
+	// ============================================================
+	middlewares := []middleware.Middleware{
+		middleware.RequestID,
+		middleware.RecoveryWithLogger(log),
+		middleware.LoggingWithLogger(log),
+	}
+	// Add rate limiter if enabled
+	if cfg.RateLimit.Enabled {
+		rateLimiter := middleware.NewRateLimiter(
+			middleware.RateLimiterConfig{
+				Rate:     cfg.RateLimit.Rate,
+				Burst:    cfg.RateLimit.Burst,
+				Interval: cfg.RateLimit.Interval,
+				Cleanup:  cfg.RateLimit.Cleanup,
+			},
+			log,
+		)
+		middlewares = append(middlewares, rateLimiter.Middleware())
+		log.Info("rate limiter enabled",
+			"rate", cfg.RateLimit.Rate,
+			"burst", cfg.RateLimit.Burst,
+		)
+	}
+
+	wrappedRouter := middleware.Chain(router, middlewares...)
 
 	// ============================================================
 	// CREATE SERVER WITH CONFIG TIMEOUTS
