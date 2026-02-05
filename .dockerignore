@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+url-shortener
+*.exe
+bin/
+
+# Test files
+*_test.go
+coverage.out
+
+# Documentation
+*.md
+docs/
+
+# Docker files (not needed in context)
+docker-compose*.yml
+Dockerfile*
+
+# Local env files
+.env.local
+.env.development
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
