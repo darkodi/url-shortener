@@ -74,8 +74,8 @@ func (v *URLValidator) ValidateShortCode(code string) *errors.AppError {
 	}
 
 	// Check length (typically 6-10 characters)
-	if len(code) < 3 || len(code) > 20 {
-		return errors.BadRequest("Short code must be between 4 and 20 characters")
+	if len(code) < 1 || len(code) > 20 {
+		return errors.BadRequest("Short code must be between 1 and 20 characters")
 	}
 
 	// Check format (alphanumeric only)

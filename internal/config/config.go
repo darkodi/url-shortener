@@ -15,6 +15,7 @@ type Config struct {
 	App       AppConfig
 	Log       LogConfig
 	RateLimit RateLimitConfig
+	Redis     RedisConfig
 }
 
 // ServerConfig holds HTTP server settings
@@ -51,6 +52,13 @@ type RateLimitConfig struct {
 	Cleanup  time.Duration // Cleanup interval
 }
 
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
+	DB       int
+}
+
 // Load reads configuration from environment variables
 func Load() (*Config, error) {
 	cfg := &Config{
@@ -79,6 +87,12 @@ func Load() (*Config, error) {
 			Burst:    getIntEnv("RATE_LIMIT_BURST", 20),
 			Interval: getDurationEnv("RATE_LIMIT_INTERVAL", time.Second),
 			Cleanup:  getDurationEnv("RATE_LIMIT_CLEANUP", 5*time.Minute),
+		},
+		Redis: RedisConfig{
+			Host:     getEnv("REDIS_HOST", "localhost"),
+			Port:     getEnv("REDIS_PORT", "6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getIntEnv("REDIS_DB", 0),
 		},
 	}
 

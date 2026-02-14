@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/darkodi/url-shortener/internal/cache"
 	"github.com/darkodi/url-shortener/internal/config"
 	"github.com/darkodi/url-shortener/internal/handler"
 	"github.com/darkodi/url-shortener/internal/logger"
@@ -60,8 +61,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ============================================================
+	// INITIALIZE REDIS CACHE
+	// ============================================================
+	log.Info("connecting to Redis...")
+	redisCache, err := cache.NewRedisCache(&cfg.Redis)
+	if err != nil {
+		log.Error("Failed to connect to Redis", "error", err.Error())
+		os.Exit(1)
+	}
+	defer func() {
+		if err := redisCache.Close(); err != nil {
+			log.Error("Failed to close Redis client", "error", err.Error())
+		}
+	}()
+	log.Info("Redis connected successfully!")
+
 	fmt.Println("⚙️  Initializing service...")
-	svc := service.NewURLService(repo, cfg.App.BaseURL)
+	svc := service.NewURLService(repo, cfg.App.BaseURL, redisCache)
 
 	fmt.Println("🌐 Setting up HTTP handlers...")
 	h := handler.NewURLHandler(svc)

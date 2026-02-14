@@ -1,10 +1,14 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/darkodi/url-shortener/internal/cache"
 	"github.com/darkodi/url-shortener/internal/encoder"
 	"github.com/darkodi/url-shortener/internal/model"
 	"github.com/darkodi/url-shortener/internal/repository"
@@ -23,13 +27,15 @@ var (
 type URLService struct {
 	repo    *repository.URLRepository
 	baseURL string // e.g., "http://localhost:8080"
+	cache   *cache.RedisCache
 }
 
 // NewURLService creates a new service instance
-func NewURLService(repo *repository.URLRepository, baseURL string) *URLService {
+func NewURLService(repo *repository.URLRepository, baseURL string, cache *cache.RedisCache) *URLService {
 	return &URLService{
 		repo:    repo,
 		baseURL: strings.TrimRight(baseURL, "/"),
+		cache:   cache,
 	}
 }
 
@@ -77,6 +83,16 @@ func (s *URLService) CreateShortURL(req model.CreateURLRequest) (*model.CreateUR
 	if err := s.repo.Create(urlRecord); err != nil {
 		return nil, err
 	}
+	// ============ REDIS: Write-Through Cache ============
+	if s.cache != nil {
+		ctx := context.Background()
+		cacheKey := fmt.Sprintf("url:%s", shortCode)
+		ttl := 24 * time.Hour
+		if err := s.cache.Set(ctx, cacheKey, req.URL, ttl); err != nil {
+			// Log warning but don't fail the request
+			fmt.Printf("Warning: failed to cache URL on create: %v\n", err)
+		}
+	}
 
 	// ============ STEP 4: Build response ============
 	return &model.CreateURLResponse{
@@ -87,6 +103,20 @@ func (s *URLService) CreateShortURL(req model.CreateURLRequest) (*model.CreateUR
 
 // Resolve finds the original URL and increments click count
 func (s *URLService) Resolve(shortCode string) (string, error) {
+	// ============ REDIS: Try cache first (Cache-Aside) ============
+	if s.cache != nil {
+		ctx := context.Background()
+		cacheKey := fmt.Sprintf("url:%s", shortCode)
+
+		cachedURL, err := s.cache.Get(ctx, cacheKey)
+		if err == nil && cachedURL != "" {
+			// Cache hit! Increment count and return
+			_ = s.repo.IncrementClickCount(shortCode)
+			return cachedURL, nil
+		}
+	}
+
+	// ============ REDIS: Cache miss - Get from database ============
 	// Find the URL
 	urlRecord, err := s.repo.GetByShortCode(shortCode)
 	if err == repository.ErrNotFound {
@@ -94,6 +124,16 @@ func (s *URLService) Resolve(shortCode string) (string, error) {
 	}
 	if err != nil {
 		return "", err
+	}
+
+	// ============ REDIS: Populate cache for next time ============
+	if s.cache != nil {
+		ctx := context.Background()
+		cacheKey := fmt.Sprintf("url:%s", shortCode)
+		ttl := 24 * time.Hour
+		if err := s.cache.Set(ctx, cacheKey, urlRecord.OriginalURL, ttl); err != nil {
+			fmt.Printf("Warning: failed to cache URL on read: %v\n", err)
+		}
 	}
 
 	// Increment click count (fire and forget - don't fail if this errors)

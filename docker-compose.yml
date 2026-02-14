@@ -11,7 +11,10 @@ services:
       - SERVER_PORT=8080
       - DATABASE_PATH=/app/data/urls.db
       - APP_BASE_URL=http://localhost:8080
-      - REDIS_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
       - LOG_LEVEL=info
       - LOG_FORMAT=json
       - RATE_LIMIT_ENABLED=true
