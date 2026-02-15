@@ -55,7 +55,7 @@ func main() {
 	// INITIALIZE LAYERS
 	// ============================================================
 	fmt.Println("🗄️  Connecting to database...")
-	repo, err := repository.NewURLRepository(cfg.Database.Path)
+	repo, err := repository.NewURLRepository(&cfg.Database)
 	if err != nil {
 		log.Error("Failed to initialize database", "error", err.Error())
 		os.Exit(1)

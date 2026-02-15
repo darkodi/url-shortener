@@ -1,38 +1,123 @@
 services:
-  url-shortener:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: url-shortener
-    ports:
-      - "8080:8080"
+  # ============================================================
+  # PRIMARY POSTGRESQL DATABASE
+  # ============================================================
+  postgres-primary:
+    image: postgres:16-alpine
+    container_name: postgres-primary
     environment:
-      - APP_ENV=production
-      - SERVER_PORT=8080
-      - DATABASE_PATH=/app/data/urls.db
-      - APP_BASE_URL=http://localhost:8080
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=
-      - REDIS_DB=0
-      - LOG_LEVEL=info
-      - LOG_FORMAT=json
-      - RATE_LIMIT_ENABLED=true
-      - RATE_LIMIT_RATE=10
-      - RATE_LIMIT_BURST=20
+      POSTGRES_USER: urlshortener
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: urlshortener
+    command: |
+      postgres
+      -c wal_level=replica
+      -c hot_standby=on
+      -c max_wal_senders=10
+      -c max_replication_slots=10
+      -c hot_standby_feedback=on
+      -c listen_addresses='*'
+    ports:
+      - "5432:5432"
     volumes:
-      # Persist SQLite database
-      - url_data:/app/data
-    restart: unless-stopped
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./init-primary.sh:/docker-entrypoint-initdb.d/init-primary.sh
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      test: ["CMD-SHELL", "pg_isready -U urlshortener"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - url-shortener-network
 
+  # ============================================================
+  # READ REPLICA 1
+  # ============================================================
+  postgres-replica1:
+    image: postgres:16-alpine
+    container_name: postgres-replica1
+    environment:
+      POSTGRES_PASSWORD: password
+    command: >
+      bash -c '
+      echo "Waiting for primary to be ready...";
+      until pg_isready -h postgres-primary -U urlshortener -d urlshortener; do sleep 1; done;
+      echo "Removing old data...";
+      rm -rf /var/lib/postgresql/data/*;
+      echo "Creating base backup from primary...";
+      until PGPASSWORD=password pg_basebackup -h postgres-primary -U urlshortener -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+        echo "Base backup failed, retrying in 2s...";
+        sleep 2;
+      done;
+      echo "✅ Base backup complete!";
+      chmod 0700 /var/lib/postgresql/data;
+      chown -R postgres:postgres /var/lib/postgresql/data;
+      echo "Starting replica...";
+      exec postgres;
+      '
+    user: postgres
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_replica1_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U urlshortener"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - url-shortener-network
+
+  # ============================================================
+  # READ REPLICA 2
+  # ============================================================
+  postgres-replica2:
+    image: postgres:16-alpine
+    container_name: postgres-replica2
+    environment:
+      POSTGRES_PASSWORD: password
+    command: >
+      bash -c '
+      echo "Waiting for primary to be ready...";
+      until pg_isready -h postgres-primary -U urlshortener -d urlshortener; do sleep 1; done;
+      echo "Removing old data...";
+      rm -rf /var/lib/postgresql/data/*;
+      echo "Creating base backup from primary...";
+      until PGPASSWORD=password pg_basebackup -h postgres-primary -U urlshortener -D /var/lib/postgresql/data -Fp -Xs -P -R; do
+        echo "Base backup failed, retrying in 2s...";
+        sleep 2;
+      done;
+      echo "✅ Base backup complete!";
+      chmod 0700 /var/lib/postgresql/data;
+      chown -R postgres:postgres /var/lib/postgresql/data;
+      echo "Starting replica...";
+      exec postgres;
+      '
+    user: postgres
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_replica2_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U urlshortener"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - url-shortener-network
+
+  # ============================================================
+  # REDIS & APP
+  # ============================================================
   redis:
     image: redis:7-alpine
+    container_name: redis
     ports:
       - "6379:6379"
     volumes:
@@ -40,13 +125,59 @@ services:
     command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - url-shortener-network
+
+  url-shortener:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: url-shortener
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DB_DRIVER: postgres
+      DB_HOST: postgres-primary
+      DB_PORT: 5432
+      DB_USER: urlshortener
+      DB_PASSWORD: password
+      DB_NAME: urlshortener
+      DB_SSLMODE: disable
+      DB_MAX_OPEN_CONNS: 25
+      DB_MAX_IDLE_CONNS: 5
+      DB_REPLICA_HOSTS: postgres-replica1,postgres-replica2
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 8080
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      RATE_LIMIT_ENABLED: true
+      RATE_LIMIT_RATE: 10
+      RATE_LIMIT_BURST: 20
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - url-shortener-network
 
 volumes:
-  url_data:
-    driver: local
+  postgres_primary_data:
+  postgres_replica1_data:
+  postgres_replica2_data:
   redis_data:
-  
+
+networks:
+  url-shortener-network:
+    driver: bridge

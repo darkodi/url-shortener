@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,7 +30,26 @@ type ServerConfig struct {
 
 // DatabaseConfig holds database settings
 type DatabaseConfig struct {
+	// Common settings
+	Driver       string // "postgres" or "sqlite3"
+	MaxOpenConns int
+	MaxIdleConns int
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+
+	// SQLite settings (keep for backward compatibility)
 	Path string
+
+	// PostgreSQL settings
+	Host     string
+	Port     string
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
+
+	// for Read replicas
+	ReplicaHosts []string // Replica hostnames
 }
 
 // AppConfig holds application-specific settings
@@ -70,7 +90,25 @@ func Load() (*Config, error) {
 			ShutdownTimeout: getDurationEnv("SERVER_SHUTDOWN_TIMEOUT", 30*time.Second),
 		},
 		Database: DatabaseConfig{
+			Driver:       getEnv("DB_DRIVER", "postgres"), // Default to PostgreSQL
+			MaxOpenConns: getIntEnv("DB_MAX_OPEN_CONNS", 25),
+			MaxIdleConns: getIntEnv("DB_MAX_IDLE_CONNS", 5),
+			ReadTimeout:  getDurationEnv("DB_READ_TIMEOUT", 5*time.Second),
+			WriteTimeout: getDurationEnv("DB_WRITE_TIMEOUT", 10*time.Second),
+
+			// SQLite (legacy)
 			Path: getEnv("DB_PATH", "./data/urls.db"),
+
+			// PostgreSQL
+			Host:     getEnv("DB_HOST", "localhost"),
+			Port:     getEnv("DB_PORT", "5432"),
+			User:     getEnv("DB_USER", "urlshortener"),
+			Password: getEnv("DB_PASSWORD", "password"),
+			DBName:   getEnv("DB_NAME", "urlshortener"),
+			SSLMode:  getEnv("DB_SSLMODE", "disable"),
+
+			// Read replicas
+			ReplicaHosts: getSliceEnv("DB_REPLICA_HOSTS", []string{}),
 		},
 		App: AppConfig{
 			BaseURL:     getEnv("BASE_URL", ""),
@@ -107,6 +145,14 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// Creates PostgreSQL connection string
+func (d *DatabaseConfig) BuildPostgresConnectionString(host string) string {
+	return fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		host, d.Port, d.User, d.Password, d.DBName, d.SSLMode,
+	)
 }
 
 // Validate checks if the configuration is valid
@@ -165,7 +211,6 @@ func getEnv(key, defaultValue string) string {
 	}
 	return defaultValue
 }
-
 func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	value := os.Getenv(key)
 	if value == "" {
@@ -178,7 +223,6 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	}
 	return duration
 }
-
 func getIntEnv(key string, defaultValue int) int {
 	value := os.Getenv(key)
 	if value == "" {
@@ -198,4 +242,20 @@ func getBoolEnv(key string, defaultValue bool) bool {
 		}
 	}
 	return defaultValue
+}
+func getSliceEnv(key string, defaultValue []string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	// Split by comma
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
