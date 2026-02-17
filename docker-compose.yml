@@ -340,7 +340,7 @@ services:
       - url-shortener-network
 
   # ============================================================
-  # APPLICATION (Will update in next commit)
+  # APPLICATION
   # ============================================================
   url-shortener:
     build:
@@ -359,26 +359,75 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # We'll update these in next commit
+      # ========================================
+      # Database Common Configuration
+      # ========================================
       DB_DRIVER: postgres
-      DB_HOST: postgres-shard1-primary
-      DB_PORT: 5432
       DB_USER: urlshortener
       DB_PASSWORD: password
       DB_NAME: urlshortener
       DB_SSLMODE: disable
       DB_MAX_OPEN_CONNS: 25
       DB_MAX_IDLE_CONNS: 5
-      DB_REPLICA_HOSTS: postgres-shard1-replica1,postgres-shard1-replica2
+      DB_READ_TIMEOUT: 5s          
+      DB_WRITE_TIMEOUT: 10s        
+      DB_PATH: ""                  
+
+      # ========================================
+      # Sharding Configuration
+      # ========================================
+      DB_NUM_SHARDS: 3             
+
+      # Shard 1 Configuration
+      DB_SHARD1_PRIMARY_HOST: postgres-shard1-primary    
+      DB_SHARD1_PRIMARY_PORT: 5432                       
+      DB_SHARD1_REPLICA1_HOST: postgres-shard1-replica1  
+      DB_SHARD1_REPLICA1_PORT: 5433                      
+      DB_SHARD1_REPLICA2_HOST: postgres-shard1-replica2  
+      DB_SHARD1_REPLICA2_PORT: 5434                      
+
+      # Shard 2 Configuration
+      DB_SHARD2_PRIMARY_HOST: postgres-shard2-primary  
+      DB_SHARD2_PRIMARY_PORT: 5442                     
+      DB_SHARD2_REPLICA1_HOST: postgres-shard2-replica1
+      DB_SHARD2_REPLICA1_PORT: 5443                    
+      DB_SHARD2_REPLICA2_HOST: postgres-shard2-replica2
+      DB_SHARD2_REPLICA2_PORT: 5444                    
+
+      # Shard 3 Configuration
+      DB_SHARD3_PRIMARY_HOST: postgres-shard3-primary   
+      DB_SHARD3_PRIMARY_PORT: 5452                      
+      DB_SHARD3_REPLICA1_HOST: postgres-shard3-replica1 
+      DB_SHARD3_REPLICA1_PORT: 5453                     
+      DB_SHARD3_REPLICA2_HOST: postgres-shard3-replica2 
+      DB_SHARD3_REPLICA2_PORT: 5454                     
+      
+      # ========================================
+      # Redis Configuration
+      # ========================================
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      
+      # ========================================
+      # Server Configuration
+      # ========================================
       PORT: 8080
       ENVIRONMENT: production
+      
+      # ========================================
+      # Logging
+      # ========================================
       LOG_LEVEL: info
       LOG_FORMAT: json
+      
+      # ========================================
+      # Rate Limiting
+      # ========================================
       RATE_LIMIT_ENABLED: true
       RATE_LIMIT_RATE: 10
       RATE_LIMIT_BURST: 20
+      RATE_LIMIT_INTERVAL: 1s 
+      RATE_LIMIT_CLEANUP: 5m  
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
