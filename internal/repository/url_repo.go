@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
@@ -12,55 +11,85 @@ import (
 
 	"github.com/darkodi/url-shortener/internal/config"
 	"github.com/darkodi/url-shortener/internal/model"
+	"github.com/darkodi/url-shortener/internal/sharding"
 )
 
 var ErrNotFound = errors.New("record not found")
 
-// URLRepository handles database operations
+// URLRepository uses ShardRouter
 type URLRepository struct {
-	primary  *sql.DB   // Write operations
-	replicas []*sql.DB // Read operations
-	rrIndex  uint32    // Round-robin index
-	driver   string    // "postgres" or "sqlite3"
+	router *sharding.ShardRouter // Manages connections to all shards
+	driver string                // "postgres" or "sqlite3"
 }
 
-// NewURLRepository creates repository from config
-func NewURLRepository(cfg *config.DatabaseConfig) (*URLRepository, error) {
+// NewURLRepository creates ShardRouter from full config
+func NewURLRepository(cfg *config.Config) (*URLRepository, error) {
+	// Check if sharding is enabled
+	if cfg.NumShards > 0 && cfg.Database.Driver == "postgres" {
+		// Create shard router
+		router, err := sharding.NewShardRouter(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create shard router: %w", err)
+		}
+
+		// Initialize all shard connections
+		if err := router.Initialize(); err != nil {
+			return nil, fmt.Errorf("failed to initialize shard router: %w", err)
+		}
+
+		repo := &URLRepository{
+			router: router,
+			driver: cfg.Database.Driver,
+		}
+
+		// Run migrations on all shards
+		if err := repo.initAllShardSchemas(); err != nil {
+			router.Close()
+			return nil, fmt.Errorf("failed to initialize schemas: %w", err)
+		}
+
+		fmt.Printf("Database initialized: %s (%d shards with replication)\n",
+			cfg.Database.Driver, cfg.NumShards)
+		return repo, nil
+	}
+
+	// FALLBACK: Legacy single-database mode (SQLite or single Postgres)
+	return newLegacyRepository(&cfg.Database)
+}
+
+// Initialize schema on all shards
+func (r *URLRepository) initAllShardSchemas() error {
+	primaries, err := r.router.GetAllPrimaryDBs()
+	if err != nil {
+		return err
+	}
+
+	for i, db := range primaries {
+		if err := initPostgresSchema(db); err != nil {
+			return fmt.Errorf("failed to init schema on shard %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// Legacy repository for backward compatibility
+func newLegacyRepository(cfg *config.DatabaseConfig) (*URLRepository, error) {
+	// This is the old implementation for single database
 	var primary *sql.DB
-	var replicas []*sql.DB
 	var err error
 
-	// ============ OPEN PRIMARY DATABASE ============
 	if cfg.Driver == "postgres" {
-		primaryConn := cfg.BuildPostgresConnectionString(cfg.Host)
+		primaryConn := cfg.BuildPostgresConnectionString()
 		primary, err = openPostgres(primaryConn, cfg.MaxOpenConns, cfg.MaxIdleConns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open primary database: %w", err)
 		}
 
-		// Initialize schema
 		if err := initPostgresSchema(primary); err != nil {
 			primary.Close()
 			return nil, fmt.Errorf("failed to initialize schema: %w", err)
 		}
-
-		// ============ OPEN REPLICA DATABASES ============
-		replicas = make([]*sql.DB, 0, len(cfg.ReplicaHosts))
-		for i, replicaHost := range cfg.ReplicaHosts {
-			replicaConn := cfg.BuildPostgresConnectionString(replicaHost)
-			replica, err := openPostgres(replicaConn, cfg.MaxOpenConns, cfg.MaxIdleConns)
-			if err != nil {
-				// Close already opened connections
-				primary.Close()
-				for _, r := range replicas {
-					r.Close()
-				}
-				return nil, fmt.Errorf("failed to open replica %d: %w", i, err)
-			}
-			replicas = append(replicas, replica)
-		}
 	} else {
-		// SQLite fallback (for backward compatibility)
 		primary, err = openSQLite(cfg.Path, cfg.MaxOpenConns, cfg.MaxIdleConns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open SQLite database: %w", err)
@@ -71,16 +100,14 @@ func NewURLRepository(cfg *config.DatabaseConfig) (*URLRepository, error) {
 		}
 	}
 
-	repo := &URLRepository{
-		primary:  primary,
-		replicas: replicas,
-		rrIndex:  0,
-		driver:   cfg.Driver,
-	}
+	// Create a minimal ShardRouter with just one shard
+	router := &sharding.ShardRouter{}
+	// TODO: Implement legacy single-DB wrapper or keep old struct
 
-	fmt.Printf("Database initialized: %s (1 primary + %d replicas)\n",
-		cfg.Driver, len(replicas))
-	return repo, nil
+	return &URLRepository{
+		router: router,
+		driver: cfg.Driver,
+	}, nil
 }
 
 // ============================================================
@@ -159,22 +186,16 @@ func initSQLiteSchema(db *sql.DB) error {
 }
 
 // ============================================================
-// READ OPERATIONS (use replicas if available)
+// READ OPERATIONS
 // ============================================================
 
-func (r *URLRepository) getReadDB() *sql.DB {
-	if len(r.replicas) == 0 {
-		return r.primary
-	}
-
-	// Round-robin across replicas
-	idx := atomic.AddUint32(&r.rrIndex, 1)
-	return r.replicas[idx%uint32(len(r.replicas))]
-}
-
-// GetByShortCode retrieves a URL by short code
+// GetByShortCode uses ShardRouter for reads
 func (r *URLRepository) GetByShortCode(shortCode string) (*model.URL, error) {
-	db := r.getReadDB()
+	// Get replica DB for this short code's shard
+	db, err := r.router.GetReplicaDB(shortCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get replica DB: %w", err)
+	}
 
 	query := `SELECT id, short_code, original_url, created_at, click_count 
 	          FROM urls WHERE short_code = $1`
@@ -186,7 +207,7 @@ func (r *URLRepository) GetByShortCode(shortCode string) (*model.URL, error) {
 	}
 
 	var url model.URL
-	err := db.QueryRow(query, shortCode).Scan(
+	err = db.QueryRow(query, shortCode).Scan(
 		&url.ID,
 		&url.ShortCode,
 		&url.OriginalURL,
@@ -201,17 +222,23 @@ func (r *URLRepository) GetByShortCode(shortCode string) (*model.URL, error) {
 }
 
 // ============================================================
-// WRITE OPERATIONS (always primary)
+// WRITE OPERATIONS
 // ============================================================
 
-// Create inserts a new URL
+// Create uses ShardRouter for writes
 func (r *URLRepository) Create(url *model.URL) error {
+	// Get primary DB for this short code's shard
+	db, err := r.router.GetPrimaryDB(url.ShortCode)
+	if err != nil {
+		return fmt.Errorf("failed to get primary DB: %w", err)
+	}
+
 	query := `INSERT INTO urls (short_code, original_url) VALUES ($1, $2) RETURNING id`
 
 	if r.driver == "sqlite3" {
 		// SQLite doesn't support RETURNING
 		query = `INSERT INTO urls (short_code, original_url) VALUES (?, ?)`
-		result, err := r.primary.Exec(query, url.ShortCode, url.OriginalURL)
+		result, err := db.Exec(query, url.ShortCode, url.OriginalURL)
 		if err != nil {
 			return err
 		}
@@ -224,58 +251,67 @@ func (r *URLRepository) Create(url *model.URL) error {
 	}
 
 	// PostgreSQL with RETURNING
-	err := r.primary.QueryRow(query, url.ShortCode, url.OriginalURL).Scan(&url.ID)
+	err = db.QueryRow(query, url.ShortCode, url.OriginalURL).Scan(&url.ID)
 	return err
 }
 
-// IncrementClickCount increments click counter
+// IncrementClickCount uses ShardRouter
 func (r *URLRepository) IncrementClickCount(shortCode string) error {
+	// Get primary DB for this short code's shard
+	db, err := r.router.GetPrimaryDB(shortCode)
+	if err != nil {
+		return fmt.Errorf("failed to get primary DB: %w", err)
+	}
+
 	query := `UPDATE urls SET click_count = click_count + 1 WHERE short_code = $1`
 
 	if r.driver == "sqlite3" {
 		query = `UPDATE urls SET click_count = click_count + 1 WHERE short_code = ?`
 	}
 
-	_, err := r.primary.Exec(query, shortCode)
+	_, err = db.Exec(query, shortCode)
 	return err
 }
 
-// GetNextID returns next available ID
+// GetNextID queries all shards and returns max
 func (r *URLRepository) GetNextID() (uint64, error) {
-	var maxID sql.NullInt64
+	primaries, err := r.router.GetAllPrimaryDBs()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get primary databases: %w", err)
+	}
+
+	var globalMaxID uint64
 	query := `SELECT MAX(id) FROM urls`
 
-	err := r.primary.QueryRow(query).Scan(&maxID)
-	if err != nil {
-		return 0, err
+	// Query each shard for its max ID
+	for i, db := range primaries {
+		var maxID sql.NullInt64
+		err := db.QueryRow(query).Scan(&maxID)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get max ID from shard %d: %w", i, err)
+		}
+
+		if maxID.Valid && uint64(maxID.Int64) > globalMaxID {
+			globalMaxID = uint64(maxID.Int64)
+		}
 	}
 
-	if !maxID.Valid {
-		return 1, nil
-	}
-
-	return uint64(maxID.Int64) + 1, nil
+	return globalMaxID + 1, nil
 }
 
 // ============================================================
 // LIFECYCLE
 // ============================================================
 
+// Close closes the ShardRouter
 func (r *URLRepository) Close() error {
-	var errs []error
-
-	if err := r.primary.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("primary: %w", err))
-	}
-
-	for i, replica := range r.replicas {
-		if err := replica.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("replica %d: %w", i, err))
-		}
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("close errors: %v", errs)
+	if r.router != nil {
+		return r.router.Close()
 	}
 	return nil
+}
+
+// GetShardRouter exposes the router for advanced operations
+func (r *URLRepository) GetShardRouter() *sharding.ShardRouter {
+	return r.router
 }
