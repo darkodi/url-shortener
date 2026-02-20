@@ -357,6 +357,18 @@ services:
         condition: service_healthy
       postgres-shard3-primary:
         condition: service_healthy
+      postgres-shard1-replica1:     
+        condition: service_healthy
+      postgres-shard1-replica2:     
+        condition: service_healthy
+      postgres-shard2-replica1:     
+        condition: service_healthy
+      postgres-shard2-replica2:     
+        condition: service_healthy
+      postgres-shard3-replica1:      
+        condition: service_healthy
+      postgres-shard3-replica2:    
+        condition: service_healthy
       redis:
         condition: service_healthy
     # No host port binding — internal service only.
@@ -387,25 +399,25 @@ services:
       DB_SHARD1_PRIMARY_HOST: postgres-shard1-primary
       DB_SHARD1_PRIMARY_PORT: 5432
       DB_SHARD1_REPLICA1_HOST: postgres-shard1-replica1
-      DB_SHARD1_REPLICA1_PORT: 5433
+      DB_SHARD1_REPLICA1_PORT: 5432
       DB_SHARD1_REPLICA2_HOST: postgres-shard1-replica2
-      DB_SHARD1_REPLICA2_PORT: 5434
+      DB_SHARD1_REPLICA2_PORT: 5432
 
       # Shard 2
       DB_SHARD2_PRIMARY_HOST: postgres-shard2-primary
-      DB_SHARD2_PRIMARY_PORT: 5442
+      DB_SHARD2_PRIMARY_PORT: 5432
       DB_SHARD2_REPLICA1_HOST: postgres-shard2-replica1
-      DB_SHARD2_REPLICA1_PORT: 5443
+      DB_SHARD2_REPLICA1_PORT: 5432
       DB_SHARD2_REPLICA2_HOST: postgres-shard2-replica2
-      DB_SHARD2_REPLICA2_PORT: 5444
+      DB_SHARD2_REPLICA2_PORT: 5432
 
       # Shard 3
       DB_SHARD3_PRIMARY_HOST: postgres-shard3-primary
-      DB_SHARD3_PRIMARY_PORT: 5452
+      DB_SHARD3_PRIMARY_PORT: 5432
       DB_SHARD3_REPLICA1_HOST: postgres-shard3-replica1
-      DB_SHARD3_REPLICA1_PORT: 5453
+      DB_SHARD3_REPLICA1_PORT: 5432
       DB_SHARD3_REPLICA2_HOST: postgres-shard3-replica2
-      DB_SHARD3_REPLICA2_PORT: 5454
+      DB_SHARD3_REPLICA2_PORT: 5432
 
       # ========================================
       # Redis Configuration
@@ -456,6 +468,18 @@ services:
         condition: service_healthy
       postgres-shard3-primary:
         condition: service_healthy
+      postgres-shard1-replica1:     
+        condition: service_healthy
+      postgres-shard1-replica2:     
+        condition: service_healthy
+      postgres-shard2-replica1:     
+        condition: service_healthy
+      postgres-shard2-replica2:     
+        condition: service_healthy
+      postgres-shard3-replica1:      
+        condition: service_healthy
+      postgres-shard3-replica2:    
+        condition: service_healthy
       redis:
         condition: service_healthy
     # No host port binding — internal service only.
@@ -486,25 +510,25 @@ services:
       DB_SHARD1_PRIMARY_HOST: postgres-shard1-primary
       DB_SHARD1_PRIMARY_PORT: 5432
       DB_SHARD1_REPLICA1_HOST: postgres-shard1-replica1
-      DB_SHARD1_REPLICA1_PORT: 5433
+      DB_SHARD1_REPLICA1_PORT: 5432
       DB_SHARD1_REPLICA2_HOST: postgres-shard1-replica2
-      DB_SHARD1_REPLICA2_PORT: 5434
+      DB_SHARD1_REPLICA2_PORT: 5432
 
       # Shard 2
       DB_SHARD2_PRIMARY_HOST: postgres-shard2-primary
-      DB_SHARD2_PRIMARY_PORT: 5442
+      DB_SHARD2_PRIMARY_PORT: 5432
       DB_SHARD2_REPLICA1_HOST: postgres-shard2-replica1
-      DB_SHARD2_REPLICA1_PORT: 5443
+      DB_SHARD2_REPLICA1_PORT: 5432
       DB_SHARD2_REPLICA2_HOST: postgres-shard2-replica2
-      DB_SHARD2_REPLICA2_PORT: 5444
+      DB_SHARD2_REPLICA2_PORT: 5432
 
       # Shard 3
       DB_SHARD3_PRIMARY_HOST: postgres-shard3-primary
-      DB_SHARD3_PRIMARY_PORT: 5452
+      DB_SHARD3_PRIMARY_PORT: 5432
       DB_SHARD3_REPLICA1_HOST: postgres-shard3-replica1
-      DB_SHARD3_REPLICA1_PORT: 5453
+      DB_SHARD3_REPLICA1_PORT: 5432
       DB_SHARD3_REPLICA2_HOST: postgres-shard3-replica2
-      DB_SHARD3_REPLICA2_PORT: 5454
+      DB_SHARD3_REPLICA2_PORT: 5432
 
       # ========================================
       # Redis Configuration
