@@ -89,22 +89,6 @@ func main() {
 		middleware.RecoveryWithLogger(log),
 		middleware.LoggingWithLogger(log),
 	}
-	if cfg.RateLimit.Enabled {
-		rateLimiter := middleware.NewRateLimiter(
-			middleware.RateLimiterConfig{
-				Rate:     cfg.RateLimit.Rate,
-				Burst:    cfg.RateLimit.Burst,
-				Interval: cfg.RateLimit.Interval,
-				Cleanup:  cfg.RateLimit.Cleanup,
-			},
-			log,
-		)
-		middlewares = append(middlewares, rateLimiter.Middleware())
-		log.Info("rate limiter enabled for Shortener service",
-			"rate", cfg.RateLimit.Rate,
-			"burst", cfg.RateLimit.Burst,
-		)
-	}
 
 	wrappedRouter := middleware.Chain(router, middlewares...)
 
