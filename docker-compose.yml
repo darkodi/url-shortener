@@ -46,7 +46,7 @@ services:
         echo "Base backup failed, retrying in 2s...";
         sleep 2;
       done;
-      echo "✅ Base backup complete!";
+      echo "Base backup complete!";
       chmod 0700 /var/lib/postgresql/data;
       chown -R postgres:postgres /var/lib/postgresql/data;
       echo "Starting replica...";
@@ -84,7 +84,7 @@ services:
         echo "Base backup failed, retrying in 2s...";
         sleep 2;
       done;
-      echo "✅ Base backup complete!";
+      echo "Base backup complete!";
       chmod 0700 /var/lib/postgresql/data;
       chown -R postgres:postgres /var/lib/postgresql/data;
       echo "Starting replica...";
@@ -153,7 +153,7 @@ services:
         echo "Base backup failed, retrying in 2s...";
         sleep 2;
       done;
-      echo "✅ Base backup complete!";
+      echo "Base backup complete!";
       chmod 0700 /var/lib/postgresql/data;
       chown -R postgres:postgres /var/lib/postgresql/data;
       echo "Starting replica...";
@@ -191,7 +191,7 @@ services:
         echo "Base backup failed, retrying in 2s...";
         sleep 2;
       done;
-      echo "✅ Base backup complete!";
+      echo "Base backup complete!";
       chmod 0700 /var/lib/postgresql/data;
       chown -R postgres:postgres /var/lib/postgresql/data;
       echo "Starting replica...";
@@ -260,7 +260,7 @@ services:
         echo "Base backup failed, retrying in 2s...";
         sleep 2;
       done;
-      echo "✅ Base backup complete!";
+      echo "Base backup complete!";
       chmod 0700 /var/lib/postgresql/data;
       chown -R postgres:postgres /var/lib/postgresql/data;
       echo "Starting replica...";
@@ -298,7 +298,7 @@ services:
         echo "Base backup failed, retrying in 2s...";
         sleep 2;
       done;
-      echo "✅ Base backup complete!";
+      echo "Base backup complete!";
       chmod 0700 /var/lib/postgresql/data;
       chown -R postgres:postgres /var/lib/postgresql/data;
       echo "Starting replica...";
@@ -311,7 +311,8 @@ services:
     ports:
       - "5454:5432"
     volumes:
-      - postgres_shard3_replica3_data:/var/lib/postgresql/data
+      # FIXED: was postgres_shard3_replica3_data (typo) in the old file
+      - postgres_shard3_replica2_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U urlshortener"]
       interval: 10s
@@ -340,13 +341,15 @@ services:
       - url-shortener-network
 
   # ============================================================
-  # APPLICATION
+  # MICROSERVICE: SHORTENER (internal — write path)
+  # Handles: POST /shorten
+  # NOT exposed publicly — only reachable inside Docker network
   # ============================================================
-  url-shortener:
+  shortener:
     build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: url-shortener
+      context: .                                  # monorepo root — needed for internal/ imports
+      dockerfile: services/shortener/Dockerfile
+    container_name: shortener
     depends_on:
       postgres-shard1-primary:
         condition: service_healthy
@@ -356,8 +359,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "8080:8080"
+    # No host port binding — internal service only.
+    # Reachable as http://shortener:8081 within the Docker network.
+    expose:
+      - "8081"
     environment:
       # ========================================
       # Database Common Configuration
@@ -369,65 +374,216 @@ services:
       DB_SSLMODE: disable
       DB_MAX_OPEN_CONNS: 25
       DB_MAX_IDLE_CONNS: 5
-      DB_READ_TIMEOUT: 5s          
-      DB_WRITE_TIMEOUT: 10s        
-      DB_PATH: ""                  
+      DB_READ_TIMEOUT: 5s
+      DB_WRITE_TIMEOUT: 10s
+      DB_PATH: ""
 
       # ========================================
       # Sharding Configuration
       # ========================================
-      DB_NUM_SHARDS: 3             
+      DB_NUM_SHARDS: 3
 
-      # Shard 1 Configuration
-      DB_SHARD1_PRIMARY_HOST: postgres-shard1-primary    
-      DB_SHARD1_PRIMARY_PORT: 5432                       
-      DB_SHARD1_REPLICA1_HOST: postgres-shard1-replica1  
-      DB_SHARD1_REPLICA1_PORT: 5433                      
-      DB_SHARD1_REPLICA2_HOST: postgres-shard1-replica2  
-      DB_SHARD1_REPLICA2_PORT: 5434                      
+      # Shard 1
+      DB_SHARD1_PRIMARY_HOST: postgres-shard1-primary
+      DB_SHARD1_PRIMARY_PORT: 5432
+      DB_SHARD1_REPLICA1_HOST: postgres-shard1-replica1
+      DB_SHARD1_REPLICA1_PORT: 5433
+      DB_SHARD1_REPLICA2_HOST: postgres-shard1-replica2
+      DB_SHARD1_REPLICA2_PORT: 5434
 
-      # Shard 2 Configuration
-      DB_SHARD2_PRIMARY_HOST: postgres-shard2-primary  
-      DB_SHARD2_PRIMARY_PORT: 5442                     
+      # Shard 2
+      DB_SHARD2_PRIMARY_HOST: postgres-shard2-primary
+      DB_SHARD2_PRIMARY_PORT: 5442
       DB_SHARD2_REPLICA1_HOST: postgres-shard2-replica1
-      DB_SHARD2_REPLICA1_PORT: 5443                    
+      DB_SHARD2_REPLICA1_PORT: 5443
       DB_SHARD2_REPLICA2_HOST: postgres-shard2-replica2
-      DB_SHARD2_REPLICA2_PORT: 5444                    
+      DB_SHARD2_REPLICA2_PORT: 5444
 
-      # Shard 3 Configuration
-      DB_SHARD3_PRIMARY_HOST: postgres-shard3-primary   
-      DB_SHARD3_PRIMARY_PORT: 5452                      
-      DB_SHARD3_REPLICA1_HOST: postgres-shard3-replica1 
-      DB_SHARD3_REPLICA1_PORT: 5453                     
-      DB_SHARD3_REPLICA2_HOST: postgres-shard3-replica2 
-      DB_SHARD3_REPLICA2_PORT: 5454                     
-      
+      # Shard 3
+      DB_SHARD3_PRIMARY_HOST: postgres-shard3-primary
+      DB_SHARD3_PRIMARY_PORT: 5452
+      DB_SHARD3_REPLICA1_HOST: postgres-shard3-replica1
+      DB_SHARD3_REPLICA1_PORT: 5453
+      DB_SHARD3_REPLICA2_HOST: postgres-shard3-replica2
+      DB_SHARD3_REPLICA2_PORT: 5454
+
       # ========================================
       # Redis Configuration
       # ========================================
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      
+
       # ========================================
       # Server Configuration
       # ========================================
-      PORT: 8080
+      PORT: 8081
       ENVIRONMENT: production
-      
+
       # ========================================
       # Logging
       # ========================================
       LOG_LEVEL: info
       LOG_FORMAT: json
-      
+
       # ========================================
-      # Rate Limiting
+      # Rate Limiting — DISABLED on internal services
+      # Rate limiting is the Gateway's responsibility only
+      # ========================================
+      RATE_LIMIT_ENABLED: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - url-shortener-network
+
+  # ============================================================
+  # MICROSERVICE: REDIRECT (internal — read path)
+  # Handles: GET /:code, GET /:code/stats
+  # NOT exposed publicly — only reachable inside Docker network
+  # ============================================================
+  redirect:
+    build:
+      context: .                                 # monorepo root — needed for internal/ imports
+      dockerfile: services/redirect/Dockerfile
+    container_name: redirect
+    depends_on:
+      postgres-shard1-primary:
+        condition: service_healthy
+      postgres-shard2-primary:
+        condition: service_healthy
+      postgres-shard3-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # No host port binding — internal service only.
+    # Reachable as http://redirect:8082 within the Docker network.
+    expose:
+      - "8082"
+    environment:
+      # ========================================
+      # Database Common Configuration
+      # ========================================
+      DB_DRIVER: postgres
+      DB_USER: urlshortener
+      DB_PASSWORD: password
+      DB_NAME: urlshortener
+      DB_SSLMODE: disable
+      DB_MAX_OPEN_CONNS: 25
+      DB_MAX_IDLE_CONNS: 5
+      DB_READ_TIMEOUT: 5s
+      DB_WRITE_TIMEOUT: 10s
+      DB_PATH: ""
+
+      # ========================================
+      # Sharding Configuration
+      # ========================================
+      DB_NUM_SHARDS: 3
+
+      # Shard 1
+      DB_SHARD1_PRIMARY_HOST: postgres-shard1-primary
+      DB_SHARD1_PRIMARY_PORT: 5432
+      DB_SHARD1_REPLICA1_HOST: postgres-shard1-replica1
+      DB_SHARD1_REPLICA1_PORT: 5433
+      DB_SHARD1_REPLICA2_HOST: postgres-shard1-replica2
+      DB_SHARD1_REPLICA2_PORT: 5434
+
+      # Shard 2
+      DB_SHARD2_PRIMARY_HOST: postgres-shard2-primary
+      DB_SHARD2_PRIMARY_PORT: 5442
+      DB_SHARD2_REPLICA1_HOST: postgres-shard2-replica1
+      DB_SHARD2_REPLICA1_PORT: 5443
+      DB_SHARD2_REPLICA2_HOST: postgres-shard2-replica2
+      DB_SHARD2_REPLICA2_PORT: 5444
+
+      # Shard 3
+      DB_SHARD3_PRIMARY_HOST: postgres-shard3-primary
+      DB_SHARD3_PRIMARY_PORT: 5452
+      DB_SHARD3_REPLICA1_HOST: postgres-shard3-replica1
+      DB_SHARD3_REPLICA1_PORT: 5453
+      DB_SHARD3_REPLICA2_HOST: postgres-shard3-replica2
+      DB_SHARD3_REPLICA2_PORT: 5454
+
+      # ========================================
+      # Redis Configuration
+      # ========================================
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      # ========================================
+      # Server Configuration
+      # ========================================
+      PORT: 8082
+      ENVIRONMENT: production
+
+      # ========================================
+      # Logging
+      # ========================================
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+
+      # ========================================
+      # Rate Limiting — DISABLED on internal services
+      # Rate limiting is the Gateway's responsibility only
+      # ========================================
+      RATE_LIMIT_ENABLED: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - url-shortener-network
+
+  # ============================================================
+  # MICROSERVICE: GATEWAY (public — single entry point)
+  # Handles: routing, rate limiting, reverse proxy
+  # THE ONLY SERVICE WITH A HOST PORT BINDING
+  # ============================================================
+  gateway:
+    build:
+      context: .                                 # monorepo root
+      dockerfile: services/gateway/Dockerfile
+    container_name: gateway
+    depends_on:
+      shortener:
+        condition: service_healthy
+      redirect:
+        condition: service_healthy
+    ports:
+      - "8080:8080"                              # ← only public port in the entire stack
+    environment:
+      # ========================================
+      # Upstream Service Addresses
+      # Uses Docker service names as hostnames
+      # ========================================
+      SHORTENER_ADDR: http://shortener:8081
+      REDIRECT_ADDR: http://redirect:8082
+
+      # ========================================
+      # Server Configuration
+      # ========================================
+      PORT: 8080
+      ENVIRONMENT: production
+
+      # ========================================
+      # Logging
+      # ========================================
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+
+      # ========================================
+      # Rate Limiting — ENABLED only here
+      # This is the sole choke point for all external traffic
       # ========================================
       RATE_LIMIT_ENABLED: true
       RATE_LIMIT_RATE: 10
       RATE_LIMIT_BURST: 20
-      RATE_LIMIT_INTERVAL: 1s 
-      RATE_LIMIT_CLEANUP: 5m  
+      RATE_LIMIT_INTERVAL: 1s
+      RATE_LIMIT_CLEANUP: 5m
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
@@ -449,7 +605,7 @@ volumes:
   # Shard 3
   postgres_shard3_primary_data:
   postgres_shard3_replica1_data:
-  postgres_shard3_replica3_data:
+  postgres_shard3_replica2_data:
   # Redis
   redis_data:
 
