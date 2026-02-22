@@ -430,6 +430,7 @@ services:
       # ========================================
       PORT: 8081
       ENVIRONMENT: production
+      BASE_URL: http://localhost:8080
 
       # ========================================
       # Logging

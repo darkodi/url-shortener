@@ -23,6 +23,9 @@ var (
 	ErrURLNotFound  = errors.New("short URL not found")
 )
 
+// redisIDCounterKey is the single source of truth for ID generation across all shards.
+const redisIDCounterKey = "url_shortener:global_id_counter"
+
 // URLService handles business logic for URL operations
 type URLService struct {
 	repo    *repository.URLRepository
@@ -66,10 +69,10 @@ func (s *URLService) CreateShortURL(req model.CreateURLRequest) (*model.CreateUR
 
 		shortCode = req.CustomAlias
 	} else {
-		// Generate code from next ID
-		nextID, err := s.repo.GetNextID()
+		// Use Redis atomic counter — guaranteed unique, no cross-shard scanning
+		nextID, err := s.getNextID()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to generate short code: %w", err)
 		}
 		shortCode = encoder.Encode(nextID)
 	}
@@ -149,6 +152,18 @@ func (s *URLService) GetURLStats(shortCode string) (*model.URL, error) {
 		return nil, ErrURLNotFound
 	}
 	return urlRecord, err
+}
+
+// getNextID returns a globally unique ID using Redis atomic INCR.
+func (s *URLService) getNextID() (uint64, error) {
+	if s.cache == nil {
+		return 0, fmt.Errorf("redis cache is required for ID generation but is not initialized")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	return s.cache.Incr(ctx, redisIDCounterKey)
 }
 
 // ============ VALIDATION HELPERS ============

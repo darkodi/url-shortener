@@ -56,3 +56,16 @@ func (r *RedisCache) Close() error {
 func (r *RedisCache) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }
+
+// Incr atomically increments a counter and returns the new value.
+// If the key does not exist, it is set to 0 before incrementing (returns 1).
+func (c *RedisCache) Incr(ctx context.Context, key string) (uint64, error) {
+	val, err := c.client.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, fmt.Errorf("redis INCR failed for key %q: %w", key, err)
+	}
+	if val <= 0 {
+		return 0, fmt.Errorf("redis INCR returned unexpected value: %d", val)
+	}
+	return uint64(val), nil
+}

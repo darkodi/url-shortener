@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/darkodi/url-shortener/internal/errors"
@@ -60,6 +61,7 @@ func (h *ShortenHandler) HandleShorten(w http.ResponseWriter, r *http.Request) {
 		case service.ErrInvalidAlias:
 			errors.BadRequest("Alias must be 3-20 alphanumeric characters").WriteJSON(w)
 		default:
+			fmt.Printf("[DEBUG] CreateShortURL unknown error: %v (type: %T)\n", err, err)
 			errors.Internal("").WriteJSON(w)
 		}
 		return

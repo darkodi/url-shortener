@@ -8,8 +8,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	_ "github.com/mattn/go-sqlite3"
-
 	"github.com/darkodi/url-shortener/internal/cache"
 	"github.com/darkodi/url-shortener/internal/config"
 	"github.com/darkodi/url-shortener/internal/handler"

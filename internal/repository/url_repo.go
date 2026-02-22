@@ -273,32 +273,6 @@ func (r *URLRepository) IncrementClickCount(shortCode string) error {
 	return err
 }
 
-// GetNextID queries all shards and returns max
-func (r *URLRepository) GetNextID() (uint64, error) {
-	primaries, err := r.router.GetAllPrimaryDBs()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get primary databases: %w", err)
-	}
-
-	var globalMaxID uint64
-	query := `SELECT MAX(id) FROM urls`
-
-	// Query each shard for its max ID
-	for i, db := range primaries {
-		var maxID sql.NullInt64
-		err := db.QueryRow(query).Scan(&maxID)
-		if err != nil {
-			return 0, fmt.Errorf("failed to get max ID from shard %d: %w", i, err)
-		}
-
-		if maxID.Valid && uint64(maxID.Int64) > globalMaxID {
-			globalMaxID = uint64(maxID.Int64)
-		}
-	}
-
-	return globalMaxID + 1, nil
-}
-
 // ============================================================
 // LIFECYCLE
 // ============================================================
